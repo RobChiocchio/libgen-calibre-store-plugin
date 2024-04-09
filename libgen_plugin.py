@@ -40,16 +40,17 @@ def search_libgen(query, max_results=10, timeout=60):
 def build_search_result(tr):
     tds = tr.select('td')
     s = SearchResult()
-    s.title = tds[2].select_one("a:last-of-type").text
-    s.author = tds[1].text
+    s.title = tds[2].select_one("a:last-of-type").text.strip()
+    s.author = tds[1].select_one("a:last-of-type").text.strip()
     s.detail_item = BASE_URL + "/" + tds[2].select_one("a:last-of-type").get("href")
     size = tds[7].text
     pages = tds[5].text
     year = tds[4].text
     s.price = f"{size}\n{pages} pages\n{year}"  # use price column to display more size, pages, year
-    s.formats = tds[8].text.upper()
+    s.formats = tds[8].text.upper().strip()
     s.drm = SearchResult.DRM_UNLOCKED
     s.mirror1_url = tds[9].select_one("a:first-of-type").get("href")
+    s.mirror2_url = tds[10].select_one("a:first-of-type").get("href")
     return s
 
 
@@ -72,24 +73,38 @@ class LibgenStorePlugin(BasicStoreConfig, StorePlugin):
     def get_details(self, search_result, timeout):
         s = search_result
         br = browser(user_agent=USER_AGENT)
+        mirror = s.mirror1_url
         while True:
             try:
                 raw = br.open(s.mirror1_url).read()
+                mirror = s.mirror1_url
+                break
+            except:
+                # sever error, retry after delay
+                time.sleep(0.1)
+            try:
+                raw = br.open(s.mirror2_url).read()
+                mirror = s.mirror2_url
                 break
             except:
                 # sever error, retry after delay
                 time.sleep(0.1)
 
+        #new_base_url = urllib.parse.urlparse(mirror).hostname
+        new_base_url = urllib.parse.urlsplit(mirror).geturl()
         soup2 = BeautifulSoup(raw, "html5lib")
-        download_a = soup2.select('div[id="download"] > ul > li > a')[0]
+        tr = soup2.select("table > tbody > tr")[0]
+        td = tr.select("td")[1]
+        #download_a = td.select('a')[0]
+        download_a = td.find("a")
         download_url = download_a.get("href")
 
-        new_base_url = urllib.parse.urlparse(s.mirror1_url).hostname
-        image_url = "http://" + new_base_url + soup2.select("img")[0].get("src")
+        image_url = soup2.select("img")[-1].get("src")
 
-        s.downloads[s.formats] = download_url
-        s.cover_url = image_url
+        s.downloads[s.formats] = urllib.parse.urljoin(new_base_url, download_url)
+        s.cover_url = urllib.parse.urljoin(new_base_url, image_url)
 
 if __name__ == "__main__":
     for result in search_libgen(bytes(" ".join(sys.argv[1:]), "utf-8")):
         print(result)
+
